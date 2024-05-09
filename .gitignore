@@ -59,3 +59,6 @@ project/**/metals.sbt
 
 .bsp
 .history
+
+# scala format
+.scalafmt.conf

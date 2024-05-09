@@ -45,7 +45,7 @@ For this reason a new custom SQL dialect had to be written for Spanner, for use 
 
 ### How to build this code & use this template ?
 
-1. [Dataproc2.2]([2.2-debian12](https://cloud.google.com/dataproc/docs/concepts/versioning/dataproc-release-2.2)) images are the target execution environment
+1. [Dataproc2.2](https://cloud.google.com/dataproc/docs/concepts/versioning/dataproc-release-2.2)) images are the target execution environment
 2. Given dataproc image, need Java JDK 11 
 3. Given dataproc image, need Scala 2.12.18
 4. Also need sbt
