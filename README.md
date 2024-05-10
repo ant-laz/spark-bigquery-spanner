@@ -12,18 +12,18 @@
 
 Based upon the [spark-bigquery-connector](https://github.com/GoogleCloudDataproc/spark-bigquery-connector?tab=readme-ov-file#data-types) docs & our own observations a type mapping is required.
 
-| BigQuery GoogleSQL   | Apache Spark in Scala | Spanner GoogleSQL |
-|----------|---------------|--------------|
-| NUMERIC       | DecimalType         | FLOAT64        |
-| BOOL | BooleanType       | TBD      |
- | DATE | DateType       | DATE      |
-| DATETIME     | StringType          | TBD         |
-| FLOAT64     | DoubleType        | TBD  |
-| STRING     | StringType        | STRING(1024)  |
-| BIGNUMERIC     | DecimalType        | TBD  |
-| TIME     | LongType        | TBD  |
-| TIMETSTAMP     | TimestampType        | TIMESTAMP  |
-| INT64     | LongType        | INT64  |
+| BigQuery GoogleSQL Type   | SparkSQL Type | Spanner GoogleSQL Type |Notes |
+|----------|---------------|--------------|--------------|
+| [INT64](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#integer_types)       |   LongType       | [INT64](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#integer_types)        |   |
+| [FLOAT64](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#floating_point_types) | DoubleType    | [FLOAT64](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#floating_point_types)      |  |
+| [NUMERIC](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#decimal_types) |   DecimalType     | [NUMERIC](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#decimal_types)      |  |
+| [BIGNUMERIC](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#decimal_types) |  DecimalType      | [NUMERIC](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#decimal_types)      | Spanner does not have BIGNUMERIC  |
+| [BOOL](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#boolean_type)     |     BooleanType      | [BOOL](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#boolean_type)         |  |
+| [STRING](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#string_type)     |      StringType   | [STRING(MAX)](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#string_type)  |  |
+| [DATE](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#date_type)     |   DateType      |[DATE](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#date_type)  |  |
+| [DATETIME](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#datetime_type)     |   StringType      | [STRING(MAX)](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#string_type)  | Spanner does not have DATETIME |
+| [TIME](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#time_type)     |    LongType     | [INT64](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#integer_types)  | Spanner does not have TIME |
+| [TIMESTAMP](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#timestamp_type)     |   TimestampType      |[TIMESTAMP](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#timestamp_type)  |  |
 
 **2. no jdbc dialect for spanner**
 
@@ -45,14 +45,15 @@ For this reason a new custom SQL dialect had to be written for Spanner, for use 
 
 ### How to build this code & use this template ?
 
-1. [Dataproc2.2](https://cloud.google.com/dataproc/docs/concepts/versioning/dataproc-release-2.2)) images are the target execution environment
+1. [Dataproc2.2](https://cloud.google.com/dataproc/docs/concepts/versioning/dataproc-release-2.2) images are the target execution environment
 2. Given dataproc image, need Java JDK 11 
 3. Given dataproc image, need Scala 2.12.18
 4. Also need sbt
-5. Build a JAR of this code via ```sbt package```
-6. upload JAR to Google Cloud Storage
-7. download & upload a JAR of the Spanner JDBC [driver](https://cloud.google.com/spanner/docs/jdbc-drivers)
-8. Sumit a job to your dataproc cluster
+5. Build a JAR of this code by running ```sbt package``` from root of this repo. We call this the ```APP_JAR```
+6. upload JAR of this code to Google Cloud Storage
+7. upload a JAR of the Spanner JDBC [driver](https://cloud.google.com/spanner/docs/jdbc-drivers) to Google Cloud Storage. We call this the ```SPANNER_JDBC_JAR```
+8. If it does not exist, create a Spanner table with schema equal to source BigQuery table
+9. Sumit a job to your dataproc cluster to move data from BigQuery to Spanner
 
 ```shell
 gcloud dataproc jobs submit spark --cluster ${CLUSTER_NAME} \
@@ -66,16 +67,16 @@ Where the arguments have this meaning
 
 | cmd line arg   | meaning | example |
 |----------|---------------|--------------|
-| CLUSTER_NAME | TBD       | TTBD      |
- | GCS_BUCKET_JARS | TBD       | TBD      |
-| APP_JAR_NAME     | TBD          | TBD         |
-| SPANNER_JDBC_JAR     | TBD          | TBD         |
-| PROJECT_ID     | TBD        | TBD  |
-| BQ_DATASET     | TBD        | TBD  |
-| BQ_TABLE     | TBD        | TBD  |
-| SPANNER_INSTANCE     | TBD        | TBD  |
-| SPANNER_DB     | TBD        | TBD  |
-| SPANNER_TABLE     | TBD        | TBD  |
+| CLUSTER_NAME | The name of your Dataproc cluster       | my_cluster      |
+| GCS_BUCKET_JARS | The Google Cloud Storage bucket for JARs       | gs://my-jar-bucket      |
+| APP_JAR_NAME     | As above, the JAR of this template code          | spark-bigquery-spanner.jar         |
+| SPANNER_JDBC_JAR     | As above, the JAR of Spanner JDBC driver          | google-cloud-spanner-jdbc-2.17.1-single-jar-with-dependencies.jar         |
+| PROJECT_ID     | The ID of the GCP project with Datproc, BigQuery & Spanner        | ```PROJECT_ID=$(gcloud config list core/project --format="value(core.project)")```  |
+| BQ_DATASET     | The BigQuery dataset with source data        | my_bq_dataset  |
+| BQ_TABLE     | The BigQuery table with source data        | my_bq_table  |
+| SPANNER_INSTANCE     | The Spanner instance with target table        | my_spanner_instance  |
+| SPANNER_DB     | The Spanner database with target table        | my_spanner_db  |
+| SPANNER_TABLE     | The target table in Spanner        | my_spanner_table  |
 
 ### Example of using this template
 
@@ -86,15 +87,16 @@ create some environment variables
 export PROJECT_ID=$(gcloud config list core/project --format="value(core.project)")
 export PROJECT_NUM=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
 export GEO_REGION="US"
-export GCS_BUCKET="gs://${PROJECT_ID}-gcpsparkscala"
+export GCS_BUCKET="gs://${PROJECT_ID}-sparkbigqueryspanner"
 export GCS_BUCKET_JARS="${GCS_BUCKET}/jars"
-export BQ_DATASET="gcpsparkscala_demo_dataset"
+export BQ_DATASET="sparkbigqueryspanner_demo_dataset"
 export BQ_TABLE="demo"
-export SPANNER_INSTANCE="gcpsparkscala-demo-instance"
-export SPANNER_DB="gcpsparkscala-demo--db"
+export SPANNER_INSTANCE="sparkbigqueryspanner-demo-instance"
+export SPANNER_DB="sparkbigqueryspanner-demo--db"
 export SPANNER_TABLE="demo_data"
-export CLUSTER_NAME="gcpsparkscala-demo-cluster"
-export APP_JAR_NAME="gcpsparkscala.jar"
+export CLUSTER_NAME="sparkbigqueryspanner-demo-cluster"
+export APP_JAR_NAME="sparkbigqueryspanner.jar"
+export SPANNER_JDBC_JAR="google-cloud-spanner-jdbc-2.17.1-single-jar-with-dependencies.jar"
 
 ```
 enable some apis
@@ -120,7 +122,7 @@ bq mk \
  --expiration 3600 \
  --description "This is a demo table for replication to spanner" \
  ${BQ_DATASET}.${BQ_TABLE} \
- id:INT64,measure1:FLOAT64,measure2:NUMERIC,dim1:BOOL,dim2:STRING
+ id:INT64,measure1:FLOAT64,measure2:NUMERIC,measure3:BIGNUMERIC,dim1:BOOL,dim2:STRING,dim3:DATE,dim4:DATETIME,dim5:TIME,dim6:TIMESTAMP
 ```
 
 create some fake data 
@@ -134,8 +136,13 @@ bq query \
   CAST(2 AS INT64) AS id,
   CAST(6.28 AS FLOAT64) AS measure1,
   CAST(600 AS NUMERIC) AS measure2,
+  CAST(1000 AS BIGNUMERIC) as measure3,
   FALSE AS dim1,
-  "blabel" AS dim2'
+  "blabel" AS dim2,
+  DATE(2024, 01, 01) as dim3,
+  DATETIME(2008, 12, 25, 05, 30, 00) as dim4,
+  TIME(15, 30, 00) as dim5,
+  TIMESTAMP("2008-12-25 15:30:00+00") as dim6'
 ```
 
 #### Example - part 3 of 4 - Spanner table (sink)
@@ -157,17 +164,9 @@ gcloud spanner databases create ${SPANNER_DB} \
   --instance=${SPANNER_INSTANCE}
 ```
 
-create a table in our Spanner DB, with schema matching BigQuery table
-Spanner DDL uses GoogleSQL [data types](https://cloud.google.com/spanner/docs/reference/standard-sql/data-definition-language#data_types)
-
-
-| column   | BigQuery Type | Spanner Type |
-|----------|---------------|--------------|
-| id       | INT64         | INT64        |
-| measure1 | FLOAT64       | FLOAT64      |
- | measure2 | NUMERIC       | NUMERIC      |
-| dim1     | BOOL          | BOOL         |
-| dim2     | STRING        | STRING(MAX)  |
+create a table in our Spanner DB: 
+ *  column names matching BigQuery table
+ *  column types as per mapping table above
 
 
 ```shell
@@ -215,7 +214,8 @@ gcloud storage buckets create ${GCS_BUCKET} \
 
 Upload required JARs to Google Cloud Storage bucket
 
- * google-cloud-spanner-jdbc-2.17.1-single-jar-with-dependencies.jar
+ * ```APP_JAR```, the JAR of this code by running ```sbt package``` from root of this repo
+ * ```SPANNER_JDBC_JAR```, the JAR of the Spanner JDBC [driver](https://cloud.google.com/spanner/docs/jdbc-drivers)
 
 launch Scala Apache Spark job on Dataproc cluster
 
@@ -223,7 +223,7 @@ launch Scala Apache Spark job on Dataproc cluster
 gcloud dataproc jobs submit spark --cluster ${CLUSTER_NAME} \
     --region=us-central1 \
     --jar=${GCS_BUCKET_JARS}/${APP_JAR_NAME} \
-    --jars=${GCS_BUCKET_JARS}/google-cloud-spanner-jdbc-2.17.1-single-jar-with-dependencies.jar \
+    --jars=${GCS_BUCKET_JARS}/${SPANNER_JDBC_JAR} \
     -- ${PROJECT_ID} ${BQ_DATASET} ${BQ_TABLE} ${SPANNER_INSTANCE} ${SPANNER_DB} ${SPANNER_TABLE}
 ```
 

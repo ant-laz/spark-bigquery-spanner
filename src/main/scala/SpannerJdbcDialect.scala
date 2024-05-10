@@ -19,17 +19,38 @@ import org.apache.spark.sql.types._
 
 object SpannerJdbcDialect extends JdbcDialect {
 
-  // JdbcDialect is an abstract class
-  // We need to override methods of this abstract class
+  /*
+  JdbcDialect is an abstract class
+  We need to override methods of this abstract class
+   */
 
-  // Check if this dialect instance can handle a certain jdbc url.
+  /*
+  Checks if this dialect instance can handle a certain jdbc url.
+  We override this to indicate that this dialect can handle Spanner specific jdbc urls.
+   */
   override def canHandle(url: String): Boolean =
     url.toLowerCase.startsWith("jdbc:cloudspanner:")
 
-  // Change default behaviour around quoting identifiers.
-  // This is used to put quotes around the identifier in case the column name.
-  override def quoteIdentifier(colName: String): String = s"`$colName`"
+  /*
+  When reading data from a Spark JDBC Data Source.
+  For this template, the source is BigQuery.
+  Default behaviour, JdbcUtils.getCatalystType maps JDBC type to Spark Catalyst type.
+  We overwrite this type mapping to make it work for Spanner
+   */
+  override def getCatalystType(
+      sqlType: Int,
+      typeName: String,
+      size: Int,
+      md: MetadataBuilder
+  ): Option[DataType] =
+    if (sqlType == java.sql.Types.NUMERIC) Some(DecimalType(38, 9)) else None
 
+  /*
+  When writing data to a Spark JDBC Data source.
+  For this template, the sink is Spanner.
+  Default behaviour, org.apache.spark.jdbc.JdbcUtils ==> getCommonJDBCType
+  We override this to make sure all data types for writing are supported by Spanner.
+   */
   override def getJDBCType(dt: DataType): Option[JdbcType] = dt match {
     case IntegerType   => Some(JdbcType("INT64", java.sql.Types.INTEGER))
     case LongType      => Some(JdbcType("INT64", java.sql.Types.BIGINT))
@@ -46,12 +67,11 @@ object SpannerJdbcDialect extends JdbcDialect {
     case _              => None
   }
 
-  override def getCatalystType(
-      sqlType: Int,
-      typeName: String,
-      size: Int,
-      md: MetadataBuilder
-  ): Option[DataType] =
-    if (sqlType == java.sql.Types.NUMERIC) Some(DecimalType(38, 9)) else None
+  /*
+  Change default behaviour around quoting identifiers.
+  This is used to put quotes around the identifier in case the column name.
+  We override this default behaviour to make it compatible with Spanner.
+   */
+  override def quoteIdentifier(colName: String): String = s"`$colName`"
 
 }
