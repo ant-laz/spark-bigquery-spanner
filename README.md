@@ -10,19 +10,23 @@
 
 **1. data type mapping**
 
-Based upon the [spark-bigquery-connector](https://github.com/GoogleCloudDataproc/spark-bigquery-connector?tab=readme-ov-file#data-types) docs & our own observations a type mapping is required.
+The [spark-bigquery-connector](https://github.com/GoogleCloudDataproc/spark-bigquery-connector?tab=readme-ov-file#data-types) reads from BigQuery and converts BigQuery Google SQL Types into SparkSQL Types.
+
+Apahce Spark JDBC is used to write to spanner, converting SparkSQL types into Spanner GoogleSQL types.
+
+For some BigQuery GoogleSQL types, there is not equivalent in SparkSQL & Spanner GoogleSQL.
 
 | BigQuery GoogleSQL Type   | SparkSQL Type | Spanner GoogleSQL Type |Notes |
 |----------|---------------|--------------|--------------|
 | [INT64](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#integer_types)       |   LongType       | [INT64](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#integer_types)        |   |
 | [FLOAT64](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#floating_point_types) | DoubleType    | [FLOAT64](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#floating_point_types)      |  |
 | [NUMERIC](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#decimal_types) |   DecimalType     | [NUMERIC](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#decimal_types)      |  |
-| [BIGNUMERIC](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#decimal_types) |  DecimalType      | [NUMERIC](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#decimal_types)      | Spanner does not have BIGNUMERIC  |
+| [BIGNUMERIC](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#decimal_types) |  DecimalType      | [NUMERIC](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#decimal_types)      | Spark & Spanner have no Big Numeric support  |
 | [BOOL](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#boolean_type)     |     BooleanType      | [BOOL](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#boolean_type)         |  |
 | [STRING](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#string_type)     |      StringType   | [STRING(MAX)](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#string_type)  |  |
 | [DATE](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#date_type)     |   DateType      |[DATE](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#date_type)  |  |
-| [DATETIME](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#datetime_type)     |   StringType      | [STRING(MAX)](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#string_type)  | Spanner does not have DATETIME |
-| [TIME](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#time_type)     |    LongType     | [INT64](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#integer_types)  | Spanner does not have TIME |
+| [DATETIME](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#datetime_type)     |   StringType      | [STRING(MAX)](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#string_type)  | Spark & Spanner have no DATETIME type|
+| [TIME](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#time_type)     |    LongType     | [INT64](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#integer_types)  | Spark & Spanner have no TIME type|
 | [TIMESTAMP](https://cloud.google.com/bigquery/docs/reference/standard-sql/data-types#timestamp_type)     |   TimestampType      |[TIMESTAMP](https://cloud.google.com/spanner/docs/reference/standard-sql/data-types#timestamp_type)  |  |
 
 **2. no jdbc dialect for spanner**

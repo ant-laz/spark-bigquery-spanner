@@ -32,8 +32,7 @@ object SpannerJdbcDialect extends JdbcDialect {
     url.toLowerCase.startsWith("jdbc:cloudspanner:")
 
   /*
-  When reading data from a Spark JDBC Data Source.
-  For this template, the source is BigQuery.
+  When reading from Spanner w/ JDBC need to map Spanner GoogleSQL type to SparkSQL type.
   Default behaviour, JdbcUtils.getCatalystType maps JDBC type to Spark Catalyst type.
   We overwrite this type mapping to make it work for Spanner
    */
@@ -46,8 +45,7 @@ object SpannerJdbcDialect extends JdbcDialect {
     if (sqlType == java.sql.Types.NUMERIC) Some(DecimalType(38, 9)) else None
 
   /*
-  When writing data to a Spark JDBC Data source.
-  For this template, the sink is Spanner.
+  When writing to Spanner w/ JDBC need to map SparkSQL type to Spanner GoogleSQL type.
   Default behaviour, org.apache.spark.jdbc.JdbcUtils ==> getCommonJDBCType
   We override this to make sure all data types for writing are supported by Spanner.
    */
