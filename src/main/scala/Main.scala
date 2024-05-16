@@ -21,7 +21,7 @@ object Main {
   def main(args: Array[String]): Unit = {
 
     // ---------PARSE COMMAND LINE ARGUMENTS-------------------------------------
-    val numArgs = 7
+    val numArgs = 10
     if (args.length != numArgs) {
       throw new IllegalArgumentException(
         s"Exactly $numArgs arguments are required"
@@ -32,15 +32,30 @@ object Main {
     val bqProject = args(0)
     val bqDataset = args(1)
     val bqTable = args(2)
+    val bqPk = args(3)
     // sink :: Spanner instance, database & table
-    val spanProject = args(3)
-    val inst = args(4)
-    val db = args(5)
-    val tbl = args(6)
+    val spanProject = args(4)
+    val inst = args(5)
+    val numSpannerNodes = args(6)
+    val db = args(7)
+    val tbl = args(8)
+    val batchSize = args(9)
 
     // ---------Launch pipeline-------------------------------------
     val pipeline =
-      new Pipeline(bqProject, bqDataset, bqTable, spanProject, inst, db, tbl)
+      new Pipeline(
+        bqProject,
+        bqDataset,
+        bqTable,
+        bqPk,
+        spanProject,
+        inst,
+        numSpannerNodes,
+        db,
+        tbl,
+        batchSize
+      )
+
     pipeline.exe_pipeline()
   }
 }

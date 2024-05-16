@@ -21,23 +21,39 @@ class Pipeline(
     var bqProject: String,
     var bqDataset: String,
     var bqTable: String,
+    var bqPk: String,
     var spanProject: String,
     var inst: String,
+    var numSpannerNodes: String,
     var db: String,
-    var tbl: String
+    var tbl: String,
+    var batchSize: String
 ) {
 
   def exe_pipeline(): Unit = {
     // ---------CREATE SPARK SESSION---------------------------------------------
     val spark = SparkSession
       .builder()
-      .appName("gcp-spark-scala")
+      .appName("bigquery-spanner-template")
       .getOrCreate()
 
     // ---------READ SOURCE DATA FROM BIGQUERY-----------------------------------
-    val bqDF = spark.read
+    val inputDF = spark.read
       .format("bigquery")
       .load(s"$bqProject.$bqDataset.$bqTable")
+
+    // ---------REPARTITION BY PRIMARY KEY-----------------------------------
+    // How many partitions ?
+    // Let N  be the number of nodes in our spanner instance
+    // There should be 10*N partitions in our dataset
+    // How to partition?
+    // Partitioning should be done on the primary key
+    // So that rows are written sequentially by primary key. E.g. not in random order.
+    // This is all per Spanner best pratices
+    // https://cloud.google.com/spanner/docs/bulk-loading#partition-by-key)
+    val numPartitions = 10 * numSpannerNodes.toInt
+    val inputDFRepartitioned =
+      inputDF.repartition(numPartitions, inputDF(s"$bqPk"))
 
     // ---------TELL SPARK TO USE OUR CUSTOM SQL DIALECT FOR SPANNER-------------
     JdbcDialects.registerDialect(SpannerJdbcDialect)
@@ -47,12 +63,20 @@ class Pipeline(
       s"jdbc:cloudspanner:/projects/$spanProject/instances/$inst/databases/$db"
     val driver = "com.google.cloud.spanner.jdbc.JdbcDriver"
     val fmt = "jdbc"
-    bqDF.write
+    inputDFRepartitioned.write
       .format(fmt)
       .option("url", url)
       .option("driver", driver)
       .option("dbtable", tbl)
-      .option("batchsize", 200) // default is 1,000
+      // We do not need transaction isolation are we are doing a large batch of writes
+      // As per transaction documentation
+      // https://cloud.google.com/spanner/docs/transactions#introduction
+      .option("isolationLevel", "NONE")
+      // Each write to Spanner should contain hundreds of rows at a maximum.
+      // How many hundreds ?
+      // As Many as can fit into 1MB as per best practices
+      // https://cloud.google.com/spanner/docs/bulk-loading#commit-size
+      .option("batchsize", batchSize.toInt)
       .mode("append")
       .save()
   }

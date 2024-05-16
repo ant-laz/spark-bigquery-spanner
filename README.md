@@ -64,7 +64,7 @@ gcloud dataproc jobs submit spark --cluster ${CLUSTER_NAME} \
     --region=us-central1 \
     --jar=${GCS_BUCKET_JARS}/${APP_JAR_NAME} \
     --jars=${GCS_BUCKET_JARS}/${SPANNER_JDBC_JAR} \
-    -- ${PROJECT_ID} ${BQ_DATASET} ${BQ_TABLE} ${SPANNER_INSTANCE} ${SPANNER_DB} ${SPANNER_TABLE}
+    -- ${BQ_PROJECT_ID} ${BQ_DATASET} ${BQ_TABLE} ${BQ_TABLE_PK} ${SPANNER_PROJECT_ID} ${SPANNER_INSTANCE} ${NUM_SPANNER_NODES} ${SPANNER_DB} ${SPANNER_TABLE} ${JDBC_BATCH_SIZE}
 ```
 
 Where the arguments have this meaning
@@ -75,74 +75,49 @@ Where the arguments have this meaning
 | GCS_BUCKET_JARS | The Google Cloud Storage bucket for JARs       | gs://my-jar-bucket      |
 | APP_JAR_NAME     | As above, the JAR of this template code          | spark-bigquery-spanner.jar         |
 | SPANNER_JDBC_JAR     | As above, the JAR of Spanner JDBC driver          | google-cloud-spanner-jdbc-2.17.1-single-jar-with-dependencies.jar         |
-| PROJECT_ID     | The ID of the GCP project with Datproc, BigQuery & Spanner        | ```PROJECT_ID=$(gcloud config list core/project --format="value(core.project)")```  |
+| BQ_PROJECT_ID     | The ID of the GCP project with BigQuery source data        | ```gcloud config list core/project --format="value(core.project)"```  |
 | BQ_DATASET     | The BigQuery dataset with source data        | my_bq_dataset  |
 | BQ_TABLE     | The BigQuery table with source data        | my_bq_table  |
+| BQ_TABLE_PK     | Primary key column name of the BigQuery table        | my_pk_column_name  |
+| SPANNER_PROJECT_ID     | The ID of the GCP project with Spanner target        | ```BQ_PROJECT_ID=$(gcloud config list core/project --format="value(core.project)")```  |
 | SPANNER_INSTANCE     | The Spanner instance with target table        | my_spanner_instance  |
+| NUM_SPANNER_NODES     | The number of nodes the spanner instance has        | ```gcloud spanner instances describe ${SPANNER_INSTANCE} --format="value(nodeCount)"```  |
 | SPANNER_DB     | The Spanner database with target table        | my_spanner_db  |
 | SPANNER_TABLE     | The target table in Spanner        | my_spanner_table  |
+| JDBC_BATCH_SIZE     | The number of rows to bundle into a single write to Spanner        | 200  |
 
 ### Example of using this template
 
 #### Example - part 1 of 4 - environment variables + setup
 
-create some environment variables
 ```shell
 export PROJECT_ID=$(gcloud config list core/project --format="value(core.project)")
 export PROJECT_NUM=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
 export GEO_REGION="US"
 export GCS_BUCKET="gs://${PROJECT_ID}-sparkbigqueryspanner"
 export GCS_BUCKET_JARS="${GCS_BUCKET}/jars"
-export BQ_DATASET="sparkbigqueryspanner_demo_dataset"
-export BQ_TABLE="demo"
+export BQ_PROJECT_ID="bigquery-public-data"
+export BQ_DATASET="austin_311"
+export BQ_TABLE="311_service_requests"
+export BQ_TABLE_PK="unique_key"
 export SPANNER_INSTANCE="sparkbigqueryspanner-demo-instance"
 export SPANNER_DB="sparkbigqueryspanner-demo--db"
-export SPANNER_TABLE="demo_data"
+export SPANNER_TABLE="service_requests_copy"
+export JDBC_BATCH_SIZE="200"
 export CLUSTER_NAME="sparkbigqueryspanner-demo-cluster"
 export APP_JAR_NAME="spark-bigquery-spanner_2.12-0.1.0-SNAPSHOT.jar"
 export SPANNER_JDBC_JAR="google-cloud-spanner-jdbc-2.17.1-single-jar-with-dependencies.jar"
 ```
-enable some apis
-```shell
-gcloud services enable dataproc.googleapis.com
-gcloud services enable cloudresourcemanager.googleapis.com
-```
 
 #### Example - part 2 of 4 - BigQuery table (source)
 
-make a dataset to house the table
+we will use the public table
 
 ```shell
-bq --location=${GEO_REGION} mk \
---dataset \
-${PROJECT_ID}:${BQ_DATASET}
-
-```
-make a table with schema to represent different [GoogleSQL data types](https://cloud.google.com/bigquery/docs/schemas#standard_sql_data_types)
-
-```shell
-bq mk \
- --table \
- --expiration 7200 \
- --description "This is a demo table for replication to spanner" \
- ${BQ_DATASET}.${BQ_TABLE} \
- id:INT64,measure1:FLOAT64,measure2:NUMERIC,dim1:BOOL,dim2:STRING
+bigquery-public-data.austin_311.311_service_requests
 ```
 
-create some fake data 
-
-```shell
-bq query \
---append_table \
---use_legacy_sql=false \
---destination_table ${BQ_DATASET}.${BQ_TABLE} \
-'SELECT
-  CAST(2 AS INT64) AS id,
-  CAST(6.28 AS FLOAT64) AS measure1,
-  CAST(600 AS NUMERIC) AS measure2,
-  FALSE AS dim1,
-  "label" AS dim2'
-```
+It has 1,860,505 rows
 
 #### Example - part 3 of 4 - Spanner table (sink)
 
@@ -156,6 +131,11 @@ gcloud spanner instances create ${SPANNER_INSTANCE} \
   --nodes=1
 ```
 
+create environmental variable to record num nodes for later usage in template
+```shell
+export NUM_SPANNER_NODES=$(gcloud spanner instances describe ${SPANNER_INSTANCE} --format="value(nodeCount)")
+```
+
 create a database within the spanner instance (with dialect GoogleSQL)
 
 ```shell
@@ -164,24 +144,14 @@ gcloud spanner databases create ${SPANNER_DB} \
 ```
 
 create a table in our Spanner DB: 
- *  column names matching BigQuery table
+ *  column names matching BigQuery table names
  *  column types as per mapping table above
 
 
 ```shell
 gcloud spanner databases ddl update ${SPANNER_DB} \
 --instance=${SPANNER_INSTANCE} \
---ddl='CREATE TABLE demo_data ( id INT64, measure1 FLOAT64, measure2 NUMERIC, dim1 BOOL, dim2 STRING(MAX) ) PRIMARY KEY (id)'
-```
-
-create some fake data 
-
-```shell
-gcloud spanner rows insert \
-  --instance=${SPANNER_INSTANCE} \
-  --database=${SPANNER_DB} \
-  --table=${SPANNER_TABLE} \
-  --data=id=1,measure1=3.14,measure2=300,dim1=TRUE,dim2="label"
+--ddl='CREATE TABLE service_requests_copy ( unique_key STRING(MAX), complaint_description STRING(MAX), source STRING(MAX), status STRING(MAX), status_change_date TIMESTAMP, created_date TIMESTAMP, last_update_date TIMESTAMP, close_date TIMESTAMP, incident_address STRING(MAX), street_number STRING(MAX), street_name STRING(MAX), city STRING(MAX), incident_zip INT64, county STRING(MAX), state_plane_x_coordinate STRING(MAX), state_plane_y_coordinate FLOAT64, latitude FLOAT64, longitude FLOAT64, location STRING(MAX), council_district_code INT64, map_page STRING(MAX), map_tile STRING(MAX)) PRIMARY KEY (unique_key)'
 ```
 
 #### Example - part 4 of 4 - Run Scala Spark Job on Dataproc
@@ -204,6 +174,7 @@ gcloud dataproc clusters create ${CLUSTER_NAME} \
 ```
 
 create a bucket to hold JARs
+
 ```shell
 gcloud storage buckets create ${GCS_BUCKET} \
   --project=${PROJECT_ID} \
@@ -223,95 +194,5 @@ gcloud dataproc jobs submit spark --cluster ${CLUSTER_NAME} \
     --region=us-central1 \
     --jar=${GCS_BUCKET_JARS}/${APP_JAR_NAME} \
     --jars=${GCS_BUCKET_JARS}/${SPANNER_JDBC_JAR} \
-    -- ${PROJECT_ID} ${BQ_DATASET} ${BQ_TABLE} ${PROJECT_ID} ${SPANNER_INSTANCE} ${SPANNER_DB} ${SPANNER_TABLE}
+    -- ${BQ_PROJECT_ID} ${BQ_DATASET} ${BQ_TABLE} ${BQ_TABLE_PK} ${PROJECT_ID} ${SPANNER_INSTANCE} ${NUM_SPANNER_NODES} ${SPANNER_DB} ${SPANNER_TABLE} ${JDBC_BATCH_SIZE}
 ```
-
-### Load testing of this template
-
-#### load test - part 1 of 4 - environment variables + setup
-
-copy steps above
-
-#### load test - part 2 of 4 - BigQuery table (source)
-
-we will use the public table
-
-```shell
-bigquery-public-data.chicago_taxi_trips.taxi_trips
-```
-
-It has 100M rows
-
-#### load test - part 3 of 4 - Spanner table (sink)
-
-use the spanner instance from above
-
-user the spanner database from above
-
-
-create a table in our Spanner DB: 
- *  column names matching BigQuery table names
- *  column types as per mapping table above
-
-
-```shell
-gcloud spanner databases ddl update ${SPANNER_DB} \
---instance=${SPANNER_INSTANCE} \
---ddl='CREATE TABLE taxi_trips_copy ( unique_key STRING(MAX), taxi_id STRING(MAX), trip_start_timestamp TIMESTAMP, trip_end_timestamp TIMESTAMP, trip_seconds INT64, trip_miles FLOAT64, pickup_census_tract INT64, dropoff_census_tract INT64, pickup_community_area INT64, dropoff_community_area INT64, fare FLOAT64, tips FLOAT64, tolls FLOAT64, extras FLOAT64, trip_total FLOAT64, payment_type STRING(MAX), company STRING(MAX), pickup_latitude FLOAT64, pickup_longitude FLOAT64, pickup_location STRING(MAX), dropoff_latitude FLOAT64, dropoff_longitude FLOAT64, dropoff_location STRING(MAX)) PRIMARY KEY (unique_key)'
-```
-
-#### load test - part 4 of 4 - Run Scala Spark Job on Dataproc
-
-Upload required JARs to Google Cloud Storage bucket
-
- * ```APP_JAR```, the JAR of this code by running ```sbt package``` from root of this repo
- * ```SPANNER_JDBC_JAR```, the JAR of the Spanner JDBC [driver](https://cloud.google.com/spanner/docs/jdbc-drivers)
-
-update environmental variables
-
-```shell
-export BQ_DATASET="chicago_taxi_trips"
-export BQ_TABLE="taxi_trips"
-export SPANNER_TABLE="taxi_trips_copy"
-export BQ_PROJECT_ID="bigquery-public-data"
-```
-
-launch Scala Apache Spark job on Dataproc cluster
-
-```shell
-gcloud dataproc jobs submit spark --cluster ${CLUSTER_NAME} \
-    --region=us-central1 \
-    --jar=${GCS_BUCKET_JARS}/${APP_JAR_NAME} \
-    --jars=${GCS_BUCKET_JARS}/${SPANNER_JDBC_JAR} \
-    -- ${BQ_PROJECT_ID} ${BQ_DATASET} ${BQ_TABLE} ${PROJECT_ID} ${SPANNER_INSTANCE} ${SPANNER_DB} ${SPANNER_TABLE}
-```
-
-#### load test - TODO
-
-resolve this error
-
-```shell
-The transaction contains too many mutations. Insert and update operations count with the multiplicity of the number of columns they affect. For example, inserting values into one key column and four non-key columns count as five mutations total for the insert. Delete and delete range operations count as one mutation regardless of the number of columns affected. The total mutation count includes any changes to indexes that the transaction generates. Please reduce the number of writes, or use fewer indexes. (Maximum number: 80000)
-```
-
-From the Java template looks like there are additional setting I can tweak
-
-https://github.com/GoogleCloudPlatform/dataproc-templates/blob/main/java/src/main/java/com/google/cloud/dataproc/templates/jdbc/JDBCToSpanner.java#L79-L93
-
-As per the JDBC docs
-
-https://spark.apache.org/docs/latest/sql-data-sources-jdbc.html
-
-I should explore
-
-batchsize
-
-bigquery-public-data.chicago_taxi_trips.taxi_trips 
-
- * has 23 columns
- * batchsize = 200 ==> 23 * 200 =  4,600 mutations per transaction
- * 4,600 < 80,000 , the per-transaction mutation limit. 
- * need to do more investigating into why this is failing
-
-
-
