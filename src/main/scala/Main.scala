@@ -19,46 +19,28 @@ import org.apache.spark.sql.jdbc.JdbcDialects
 
 object Main {
   def main(args: Array[String]): Unit = {
+
     // ---------PARSE COMMAND LINE ARGUMENTS-------------------------------------
-    val numArgs = 6
+    val numArgs = 7
     if (args.length != numArgs) {
       throw new IllegalArgumentException(
         s"Exactly $numArgs arguments are required"
       )
     }
-    val prj = args(0)
+
     // source :: BigQuery Dataset & Table
+    val bqProject = args(0)
     val bqDataset = args(1)
     val bqTable = args(2)
     // sink :: Spanner instance, database & table
-    val inst = args(3)
-    val db = args(4)
-    val tbl = args(5)
+    val spanProject = args(3)
+    val inst = args(4)
+    val db = args(5)
+    val tbl = args(6)
 
-    // ---------CREATE SPARK SESSION---------------------------------------------
-    val spark = SparkSession
-      .builder()
-      .appName("gcp-spark-scala")
-      .getOrCreate()
-
-    // ---------READ SOURCE DATA FROM BIGQUERY-----------------------------------
-    val bqDF = spark.read
-      .format("bigquery")
-      .load(s"$prj.$bqDataset.$bqTable")
-
-    // ---------TELL SPARK TO USE OUR CUSTOM SQL DIALECT FOR SPANNER-------------
-    JdbcDialects.registerDialect(SpannerJdbcDialect)
-
-    // ---------WRITE DATA FROM BIGQUERY TO SPANNER------------------------------
-    val url = s"jdbc:cloudspanner:/projects/$prj/instances/$inst/databases/$db"
-    val driver = "com.google.cloud.spanner.jdbc.JdbcDriver"
-    val fmt = "jdbc"
-    bqDF.write
-      .format(fmt)
-      .option("url", url)
-      .option("driver", driver)
-      .option("dbtable", tbl)
-      .mode("append")
-      .save()
+    // ---------Launch pipeline-------------------------------------
+    val pipeline =
+      new Pipeline(bqProject, bqDataset, bqTable, spanProject, inst, db, tbl)
+    pipeline.exe_pipeline()
   }
 }

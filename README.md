@@ -99,13 +99,13 @@ export SPANNER_INSTANCE="sparkbigqueryspanner-demo-instance"
 export SPANNER_DB="sparkbigqueryspanner-demo--db"
 export SPANNER_TABLE="demo_data"
 export CLUSTER_NAME="sparkbigqueryspanner-demo-cluster"
-export APP_JAR_NAME="sparkbigqueryspanner.jar"
+export APP_JAR_NAME="spark-bigquery-spanner_2.12-0.1.0-SNAPSHOT.jar"
 export SPANNER_JDBC_JAR="google-cloud-spanner-jdbc-2.17.1-single-jar-with-dependencies.jar"
-
 ```
 enable some apis
 ```shell
 gcloud services enable dataproc.googleapis.com
+gcloud services enable cloudresourcemanager.googleapis.com
 ```
 
 #### Example - part 2 of 4 - BigQuery table (source)
@@ -123,10 +123,10 @@ make a table with schema to represent different [GoogleSQL data types](https://c
 ```shell
 bq mk \
  --table \
- --expiration 3600 \
+ --expiration 7200 \
  --description "This is a demo table for replication to spanner" \
  ${BQ_DATASET}.${BQ_TABLE} \
- id:INT64,measure1:FLOAT64,measure2:NUMERIC,measure3:BIGNUMERIC,dim1:BOOL,dim2:STRING,dim3:DATE,dim4:DATETIME,dim5:TIME,dim6:TIMESTAMP
+ id:INT64,measure1:FLOAT64,measure2:NUMERIC,dim1:BOOL,dim2:STRING
 ```
 
 create some fake data 
@@ -140,13 +140,8 @@ bq query \
   CAST(2 AS INT64) AS id,
   CAST(6.28 AS FLOAT64) AS measure1,
   CAST(600 AS NUMERIC) AS measure2,
-  CAST(1000 AS BIGNUMERIC) as measure3,
   FALSE AS dim1,
-  "blabel" AS dim2,
-  DATE(2024, 01, 01) as dim3,
-  DATETIME(2008, 12, 25, 05, 30, 00) as dim4,
-  TIME(15, 30, 00) as dim5,
-  TIMESTAMP("2008-12-25 15:30:00+00") as dim6'
+  "label" AS dim2'
 ```
 
 #### Example - part 3 of 4 - Spanner table (sink)
@@ -228,10 +223,95 @@ gcloud dataproc jobs submit spark --cluster ${CLUSTER_NAME} \
     --region=us-central1 \
     --jar=${GCS_BUCKET_JARS}/${APP_JAR_NAME} \
     --jars=${GCS_BUCKET_JARS}/${SPANNER_JDBC_JAR} \
-    -- ${PROJECT_ID} ${BQ_DATASET} ${BQ_TABLE} ${SPANNER_INSTANCE} ${SPANNER_DB} ${SPANNER_TABLE}
+    -- ${PROJECT_ID} ${BQ_DATASET} ${BQ_TABLE} ${PROJECT_ID} ${SPANNER_INSTANCE} ${SPANNER_DB} ${SPANNER_TABLE}
 ```
 
 ### Load testing of this template
 
-TODO
+#### load test - part 1 of 4 - environment variables + setup
+
+copy steps above
+
+#### load test - part 2 of 4 - BigQuery table (source)
+
+we will use the public table
+
+```shell
+bigquery-public-data.chicago_taxi_trips.taxi_trips
+```
+
+It has 100M rows
+
+#### load test - part 3 of 4 - Spanner table (sink)
+
+use the spanner instance from above
+
+user the spanner database from above
+
+
+create a table in our Spanner DB: 
+ *  column names matching BigQuery table names
+ *  column types as per mapping table above
+
+
+```shell
+gcloud spanner databases ddl update ${SPANNER_DB} \
+--instance=${SPANNER_INSTANCE} \
+--ddl='CREATE TABLE taxi_trips_copy ( unique_key STRING(MAX), taxi_id STRING(MAX), trip_start_timestamp TIMESTAMP, trip_end_timestamp TIMESTAMP, trip_seconds INT64, trip_miles FLOAT64, pickup_census_tract INT64, dropoff_census_tract INT64, pickup_community_area INT64, dropoff_community_area INT64, fare FLOAT64, tips FLOAT64, tolls FLOAT64, extras FLOAT64, trip_total FLOAT64, payment_type STRING(MAX), company STRING(MAX), pickup_latitude FLOAT64, pickup_longitude FLOAT64, pickup_location STRING(MAX), dropoff_latitude FLOAT64, dropoff_longitude FLOAT64, dropoff_location STRING(MAX)) PRIMARY KEY (unique_key)'
+```
+
+#### load test - part 4 of 4 - Run Scala Spark Job on Dataproc
+
+Upload required JARs to Google Cloud Storage bucket
+
+ * ```APP_JAR```, the JAR of this code by running ```sbt package``` from root of this repo
+ * ```SPANNER_JDBC_JAR```, the JAR of the Spanner JDBC [driver](https://cloud.google.com/spanner/docs/jdbc-drivers)
+
+update environmental variables
+
+```shell
+export BQ_DATASET="chicago_taxi_trips"
+export BQ_TABLE="taxi_trips"
+export SPANNER_TABLE="taxi_trips_copy"
+export BQ_PROJECT_ID="bigquery-public-data"
+```
+
+launch Scala Apache Spark job on Dataproc cluster
+
+```shell
+gcloud dataproc jobs submit spark --cluster ${CLUSTER_NAME} \
+    --region=us-central1 \
+    --jar=${GCS_BUCKET_JARS}/${APP_JAR_NAME} \
+    --jars=${GCS_BUCKET_JARS}/${SPANNER_JDBC_JAR} \
+    -- ${BQ_PROJECT_ID} ${BQ_DATASET} ${BQ_TABLE} ${PROJECT_ID} ${SPANNER_INSTANCE} ${SPANNER_DB} ${SPANNER_TABLE}
+```
+
+#### load test - TODO
+
+resolve this error
+
+```shell
+The transaction contains too many mutations. Insert and update operations count with the multiplicity of the number of columns they affect. For example, inserting values into one key column and four non-key columns count as five mutations total for the insert. Delete and delete range operations count as one mutation regardless of the number of columns affected. The total mutation count includes any changes to indexes that the transaction generates. Please reduce the number of writes, or use fewer indexes. (Maximum number: 80000)
+```
+
+From the Java template looks like there are additional setting I can tweak
+
+https://github.com/GoogleCloudPlatform/dataproc-templates/blob/main/java/src/main/java/com/google/cloud/dataproc/templates/jdbc/JDBCToSpanner.java#L79-L93
+
+As per the JDBC docs
+
+https://spark.apache.org/docs/latest/sql-data-sources-jdbc.html
+
+I should explore
+
+batchsize
+
+bigquery-public-data.chicago_taxi_trips.taxi_trips 
+
+ * has 23 columns
+ * batchsize = 200 ==> 23 * 200 =  4,600 mutations per transaction
+ * 4,600 < 80,000 , the per-transaction mutation limit. 
+ * need to do more investigating into why this is failing
+
+
 
